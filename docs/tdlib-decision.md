@@ -178,6 +178,13 @@ Pin exact versions, no ranges, as verified in this spike:
 | `prebuilt-tdlib` | 0.1008067.0 | Pinned exactly in `package.json`; this *is* the TDLib version pin — encodes TDLib **1.8.67** (commit `d1085f9cebc5a62379991ae1652673954f229c1f`), confirmed at runtime via `getTdlibInfo()` in the spike output |
 | `dotenv` | 17.4.2 | Pinned exactly; only used to read `TG_API_ID`/`TG_API_HASH` from `.env` |
 
+**Update (Task 02.1):** `typescript` was changed from `7.0.2` to **`5.9.3`**
+when the Electron + Vite + React project foundation was set up — see
+[Task 02.1 — TypeScript version update](#task-021--typescript-version-update)
+below for the full reasoning. The `7.0.2` figure in the table above is
+preserved unchanged as the exact version Tasks 01.1–01.7's spike was
+verified against; it is not the version currently pinned in `package.json`.
+
 TDLib's own version is controlled entirely by which `prebuilt-tdlib`
 version is installed — there is no separate "TDLib version" setting;
 bumping TDLib means bumping the `prebuilt-tdlib` dependency (and, per the
@@ -1069,6 +1076,13 @@ invented:
 | `dotenv` | 17.4.2 | Runtime dependency, exact pin |
 | `electron-builder` | ^26.15.3 | devDependency, added in Task 01.6, **caret range** — the one dependency in this project not following the "no ranges" rule from section 7. Not corrected as part of this documentation-only task (see item 8 in the task instructions — avoid touching files beyond this one without a functional need); flagged here as a minor, low-risk inconsistency since it is a build-time-only tool with no runtime ABI surface, not a dependency whose version affects TDLib behavior. |
 
+**Update (Task 02.1):** `typescript` was subsequently changed from `7.0.2` to
+`5.9.3` — see
+[Task 02.1 — TypeScript version update](#task-021--typescript-version-update)
+below. The `7.0.2` value in the table above is preserved as-is: it is the
+exact version Tasks 01.1–01.7 verified against, not a claim about what is
+pinned today.
+
 Node.js `22.19.0` / npm `10.9.3` were the runtime used to verify every spike
 in this document (section 5); `package.json` has no `engines` field, so this
 is a documented dev-environment fact, not an enforced constraint.
@@ -1199,3 +1213,56 @@ recorded message text is limited to disposable, self-authored test strings
 sent by the tested account itself (explicitly called out as such wherever
 recorded); paths use `<TEMP>`/`%TEMP%` placeholders rather than
 machine-specific usernames or directories.
+
+## Task 02.1 — TypeScript version update
+
+This is an addendum recording a toolchain change made **after** the
+Task 01.7 checkpoint above, while setting up the Electron + Vite + React
+project foundation (`docs/plan.md` §02). It does not change, and is not
+part of, the Tasks 01.1–01.7 spike history recorded above — every result,
+log, and version figure in the sections above remains exactly as it was
+observed at the time and is **not** rewritten by this addendum.
+
+**What changed:** the `typescript` devDependency was changed from `7.0.2`
+(the version pinned throughout Tasks 01.1–01.7, per the tables in section 7
+and "Task 01.7 — Final decision" above) to **`5.9.3`**.
+
+**Why — `typescript-eslint` does not support TypeScript 7.0.2:** Task 02.1
+requires a working ESLint setup covering TypeScript (`docs/plan.md` §02).
+TypeScript 7.x is TypeScript's native (Go-based) compiler rewrite, and no
+published release of `typescript-eslint` — including its `canary` dist-tag
+— supports it yet; this is a real, currently-open upstream gap
+([typescript-eslint#10940](https://github.com/typescript-eslint/typescript-eslint/issues/10940)),
+not a peer-dependency version-range warning that can be bypassed safely.
+Attempting to run `typescript-eslint` against TypeScript `7.0.2` fails with
+a hard error at startup ("typescript-eslint does not support TS 7.0"),
+before any lint rule even runs — so with `7.0.2` pinned, ESLint cannot
+parse `.ts`/`.tsx` files at all.
+
+**Why `5.9.3` specifically:** `typescript-eslint@8.70.0`'s peer range is
+`>=4.8.4 <6.1.0`. TypeScript `6.0.0` has no stable npm release (only
+`6.0.0-beta`/`6.0.0-dev.*` snapshots), so `5.9.3` — the latest actually
+stable release inside that range — is the newest TypeScript version
+compatible with a working, type-aware lint toolchain. It was chosen over
+forcing a newer/incompatible combination (e.g. via `--legacy-peer-deps`
+against `7.0.2`, which was tried first and fails at runtime regardless of
+npm's dependency resolution, since the incompatibility is enforced by
+`typescript-eslint` itself, not by npm).
+
+**TDLib packages unchanged:** `tdl` (`8.1.0`) and `prebuilt-tdlib`
+(`0.1008067.0`, TDLib `1.8.67`) were not touched. Neither they nor
+`electron` (`44.3.0`) declare any `peerDependencies`/`engines` constraint on
+`typescript` (checked directly against each package's installed
+`package.json`), so this change carries no compatibility risk for the
+TDLib binding decided in this document.
+
+**Spike still compiles:** after the downgrade, the existing TDLib spike
+(`spike/*.ts`, built via the original, untouched `tsconfig.json` — now run
+as `npm run build:spike`, previously plain `npm run build`) recompiles
+cleanly under TypeScript `5.9.3`, with **zero changes to any file under
+`spike/`**. No TypeScript-7-specific syntax or compiler option was in use.
+
+**Scope:** this is a `typescript` version change only. No other dependency
+version was changed as part of this update, and Node.js (`22.19.0`) / npm
+(`10.9.3`) / TDLib (`1.8.67`) remain exactly as documented in "Task 01.7 —
+Final decision" above.
