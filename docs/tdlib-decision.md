@@ -332,3 +332,115 @@ placeholder.
 reports "not a git repository"), even though `.gitignore` already excludes
 `.env`. The exclusion is correct as configuration, but cannot be verified
 against actual `git` tracking until a repository exists.
+
+## Task 01.3 verification
+
+**What was added:** `spike/cli-prompt.ts` (CLI prompt helpers - `askVisible`
+for phone/OTP, `askHidden` for the 2FA password, `closePrompts`) and a
+rewrite of `spike/standalone-client.ts` to drive the full authorization flow
+via `tdl`'s `client.login({ type: 'user', ... })`, with `getPhoneNumber`,
+`getAuthCode`, and `getPassword` wired to those prompts. State transitions
+are logged by name only (`update.authorization_state._`); phone/OTP/password
+values are never logged, saved, or written to this document.
+
+**First run - real result (`npm run spike:standalone`):**
+
+```
+[standalone] API credentials loaded: yes
+[standalone] TDLib database directory: <TEMP>\telegram-desktop-client-standalone\db
+[standalone] TDLib starting...
+[standalone] authorizationState -> authorizationStateWaitTdlibParameters
+[standalone] authorizationState -> authorizationStateWaitPhoneNumber
+(phone number entered)
+[standalone] authorizationState -> authorizationStateWaitPassword
+Two-factor password: (entered, hidden)
+[standalone] authorizationState -> authorizationStateReady
+Authorization successful
+[standalone] Client is running. Press Ctrl+C to exit.
+```
+
+`authorizationStateWaitCode` was reached and handled earlier in the same
+overall login attempt (confirmed indirectly: the account has 2FA enabled and
+TDLib only offers `authorizationStateWaitPassword` after the OTP code has
+already been accepted; by the time debugging of the password step started,
+the session had already advanced past `authorizationStateWaitCode`, so the
+raw log line for that exact state was not separately captured). Restarts
+during debugging that reused the already-populated database correctly
+resumed mid-flow, at whichever state TDLib had persisted, per `tdl`'s own
+documented behavior ("`authorizationStateWaitPhoneNumber` may not be the
+first update in the login flow in case of a previous incomplete login
+attempt").
+
+**2FA:** the test account has 2FA enabled. `authorizationStateWaitPassword`
+was reached, the password was accepted via `askHidden`, and
+`authorizationStateReady` followed immediately after. A deliberately wrong
+password was also tested (see below) and correctly triggered TDLib's
+`PASSWORD_HASH_INVALID` retry path (`tdl`'s `client.login` re-prompts
+automatically) without crashing the process.
+
+**Client shutdown:** confirmed clean via `Ctrl+C` at multiple points during
+debugging - `[standalone] SIGINT received, closing TDLib client...` ->
+`authorizationStateClosing` -> `client closed` -> `authorizationStateClosed`,
+followed by process exit. No hanging process or corrupted database was
+observed after any of these shutdowns (checked via `Get-Process`/database
+being reusable on the next run).
+
+**Second run - session persistence, real result:**
+
+```
+[standalone] API credentials loaded: yes
+[standalone] TDLib database directory: <TEMP>\telegram-desktop-client-standalone\db
+[standalone] TDLib starting...
+[standalone] authorizationState -> authorizationStateWaitTdlibParameters
+[standalone] authorizationState -> authorizationStateReady
+Authorization successful
+[standalone] Client is running. Press Ctrl+C to exit.
+```
+
+Same database directory, no `.env` changes, no code changes between the two
+runs. `authorizationStateReady` was reached directly, with **no**
+`authorizationStateWaitPhoneNumber`/`WaitCode`/`WaitPassword` and no OTP
+re-entry - session persistence is confirmed.
+
+**Problems found and how they were resolved:**
+
+- The 2FA password prompt (`askHidden`) went through three implementation
+  attempts before landing on the version now in `spike/cli-prompt.ts`:
+  1. A manual `stdin.setRawMode`/`'data'`-listener implementation, run after
+     two prior `askVisible` calls had already created and `.close()`d their
+     own `readline.Interface` on the same `process.stdin`. This left stdin
+     not accepting input at all for the password prompt.
+  2. A `readline.Interface` with a substitute (non-TTY) `Writable` as
+     `output`, to avoid the manual raw-mode toggle - still failed the same
+     way, since it still created a third fresh interface after two prior
+     ones had been closed.
+  3. **Final:** a single `readline.Interface`, created lazily once and
+     reused for all three prompts (`askVisible` and `askHidden` both call
+     `getRl()`), with `askHidden` masking echo by temporarily overriding the
+     interface's internal `_writeToOutput` for the duration of one
+     question - the standard technique for masked input with core
+     `readline`. `closePrompts()` closes it once, after login settles.
+- This final version was verified mechanically via an isolated real ConPTY
+  test (`node-pty`, fake non-secret values, realistic per-keystroke timing):
+  input accepted, hidden correctly (never appeared in the raw terminal
+  output), Enter submitted it, no hangs - including with the real TDLib
+  client loaded and actively running in the same process.
+- **The actual live symptom, once reproduced end-to-end, turned out not to
+  be a functional bug**: hidden input was working correctly the whole time;
+  because masked input produces zero visual feedback (no cursor movement, no
+  asterisks), it was indistinguishable from "not accepting input" until the
+  user typed the password blindly and pressed Enter anyway, which succeeded
+  immediately (`authorizationStateReady`). Confirmed via two diagnostics
+  first: `Ctrl+C` at the password prompt correctly triggered
+  `[standalone] SIGINT received...` (proving keyboard input reached the
+  process), and a plain `node -e "...readline..."` one-liner outside the
+  project confirmed basic `readline` input worked on the machine in general.
+- One small regression was caught and fixed along the way: the SIGINT ->
+  shutdown forwarding was dropped from `askHidden` during the interface
+  refactor (step 3 above) and had to be re-added, registered once on the
+  shared interface rather than per-question.
+- No TDLib-side or environment-side bug was ultimately identified; the
+  fixes in `spike/cli-prompt.ts` (shared interface, no manual raw-mode
+  toggling) are kept because they are more correct and robust than the
+  first two attempts, even though the originally reported symptom turned
+  out to be a UX/perception issue rather than a functional one.
