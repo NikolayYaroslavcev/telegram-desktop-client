@@ -50,6 +50,9 @@ export default tseslint.config(
         require: 'readonly',
         module: 'readonly',
         __dirname: 'readonly',
+        process: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
       },
     },
     rules: {

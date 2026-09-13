@@ -3,6 +3,8 @@ dist/
 out/
 release/
 .env
+.env.*
+!.env.example
 _td_spike_db_*/
 _td_spike_files_*/
 _td_database/
