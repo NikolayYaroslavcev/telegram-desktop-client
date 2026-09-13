@@ -444,3 +444,123 @@ re-entry - session persistence is confirmed.
   toggling) are kept because they are more correct and robust than the
   first two attempts, even though the originally reported symptom turned
   out to be a UX/perception issue rather than a functional one.
+
+## Task 01.4 verification
+
+**What was added:** an `updateNewMessage` branch in `spike/standalone-client.ts`'s
+existing `client.on('update', ...)` handler (no new file - the existing
+standalone client already owned the update stream from task 01.3). For each
+`updateNewMessage`, it logs `message.chat_id`, `message.id`, `message.date`,
+`message.is_outgoing`, `message.content._` (the content type discriminant),
+and, only when `message.content._ === 'messageText'`, `message.content.text.text`
+(the plain string - `messageText.text` is itself a `formattedText { text,
+entities }`, not a bare string, per `@prebuilt-tdlib/types`). No other
+content type's payload is read or logged.
+
+**Real run result:** the standalone client was started against the same
+already-authorized session from task 01.3 (`npm run spike:standalone`,
+resumed straight to `authorizationStateReady`, no phone/OTP re-entry) and
+left running while a second, real Telegram account sent messages to it in a
+private 1-on-1 chat.
+
+**Actual `updateNewMessage` shape observed (real fields, real private chat -
+this account's own test messages, safe to record verbatim):**
+
+```
+[standalone] updateNewMessage: {
+  chatId: 8276449701,
+  messageId: 165469487104,
+  date: 1789307787,
+  isOutgoing: false,
+  contentType: 'messageText',
+  text: 'Ууууууууу'
+}
+[standalone] updateNewMessage: {
+  chatId: 8276449701,
+  messageId: 165470535680,
+  date: 1789307822,
+  isOutgoing: true,
+  contentType: 'messageText',
+  text: '23121312'
+}
+```
+
+and, after a full restart (see below):
+
+```
+[standalone] updateNewMessage: {
+  chatId: 8276449701,
+  messageId: 165471584256,
+  date: 1789307895,
+  isOutgoing: true,
+  contentType: 'messageText',
+  text: 'RESTART_TEST'
+}
+```
+
+`chat_id` for a private chat is a plain positive user id (`8276449701`), and
+`message.date` is a Unix timestamp in seconds, matching `@prebuilt-tdlib/types`.
+
+**Multiple/sequential messages:** confirmed - several private-chat messages
+sent a few seconds to tens of seconds apart each produced their own,
+correctly-ordered `updateNewMessage` with strictly increasing `messageId`
+and `date`. (The same run also received a much larger volume of
+`updateNewMessage` from pre-existing group/supergroup chats this account is
+already a member of - TDLib does not filter updates by chat type, exactly as
+plan §09 anticipates. Those chats surface `chat_id` values in the
+`-100xxxxxxxxxx` supergroup/channel range, clearly distinguishable from the
+plain positive id of a private chat. Their message content belongs to real
+third parties and is intentionally **not** reproduced in this document -
+group/channel/bot handling is out of scope for this whole project (plan
+§00) and unrelated to what task 01.4 needs to prove; this spike does not
+filter by chat type, since that filtering itself is explicitly plan step
+09, not 01.4.)
+
+**Message sent from another account (incoming):** the `'Ууууууууу'` message
+above was sent from a second, separate Telegram account directly to the
+tested account's private chat and correctly arrived with `isOutgoing: false`.
+
+**`isOutgoing` on a message sent from the tested account itself:** confirmed
+`true` twice - `'23121312'` (sent from another logged-in client of the same
+tested account, before restart) and `'RESTART_TEST'` (sent the same way,
+after restart). Both were delivered as ordinary `updateNewMessage` events
+with `is_outgoing: true`, with no special-casing needed to receive them
+(they arrive through the same update stream as incoming messages).
+
+**Content types actually observed (not assumed):** `messageText` (handled -
+text extracted from `content.text.text`), plus, from the surrounding
+group-chat traffic in the same run and correctly identified without
+crashing: `messageAnimation`, `messagePhoto`, `messageVideo`. For all
+non-`messageText` types the handler logs `contentType` and `text:
+undefined` - no attempt is made to extract a preview/caption from these,
+which is correct per this task's scope (text-only extraction).
+
+**Restart check, real result:** the client was shut down (previous process
+terminated) and `npm run spike:standalone` was run again from a completely
+fresh process. Session persistence held (straight to
+`authorizationStateReady`, no re-auth), and a new message
+(`'RESTART_TEST'`, shown above) sent immediately after produced a fresh
+`updateNewMessage` in the new process - confirming the update subscription
+is re-established correctly on every startup, not just tied to the
+in-memory state of a single run.
+
+**Secrets check:** none of the logged fields (`chat_id`, `message.id`,
+`message.date`, `message.is_outgoing`, content type, text) can carry
+`api_hash`, OTP, or the 2FA password - those values are never part of a
+TDLib `message` object and are not read or logged anywhere in this handler.
+
+**Limitations / open items found:**
+
+- The update handler is global and un-filtered: it logs `updateNewMessage`
+  for every chat the account is a member of, including supergroups/channels
+  with heavy, unrelated real-user traffic. This is expected and intentional
+  for this task (chat-type filtering is plan §09, not §01.4) but means this
+  spike is noisy to run against an account that's in active groups - a
+  future integration step should filter to `chat.type._ === 'chatTypePrivate'`
+  before doing anything with the update, per plan §09/§11.
+- `messageText.text` is a `formattedText` (text + entities), not a bare
+  string - entities (bold/links/mentions/etc.) are present on real messages
+  but are not read or logged by this spike; only the plain `text.text`
+  string is extracted, per this task's "minimally necessary data" scope.
+- No delete/edit updates were exercised here (`updateDeleteMessages` is
+  explicitly plan step 01.5, not this task).

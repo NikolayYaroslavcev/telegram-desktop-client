@@ -8,11 +8,12 @@ import { askVisible, askHidden, closePrompts } from './cli-prompt'
 tdl.configure({ tdjson: getTdjson() })
 
 /**
- * Minimal standalone TDLib client (task 01.3). Loads real API credentials
- * from `.env`, starts a real TDLib client via `tdl` + `prebuilt-tdlib`, and
- * drives the full authorization flow (phone number -> OTP -> optional 2FA
- * password -> ready) via CLI prompts. Stops at authorizationStateReady - no
- * chats/messages/UI/IPC, see docs/plan.md #01.4+.
+ * Minimal standalone TDLib client (tasks 01.3-01.4). Loads real API
+ * credentials from `.env`, starts a real TDLib client via `tdl` +
+ * `prebuilt-tdlib`, and drives the full authorization flow (phone number ->
+ * OTP -> optional 2FA password -> ready) via CLI prompts. Once ready, logs
+ * safe diagnostic fields from incoming `updateNewMessage` updates. No
+ * history/UI/IPC/send-as-a-feature, see docs/plan.md #01.5+.
  */
 
 const apiId = Number(process.env.TG_API_ID ?? '')
@@ -85,8 +86,22 @@ client.on('error', (err) => {
 // Logs authorizationState transitions by name only - never the full update
 // object, which could otherwise carry TDLib-echoed request fields.
 client.on('update', (update) => {
-  if (update._ !== 'updateAuthorizationState') return
-  console.log(`[standalone] authorizationState -> ${update.authorization_state._}`)
+  if (update._ === 'updateAuthorizationState') {
+    console.log(`[standalone] authorizationState -> ${update.authorization_state._}`)
+    return
+  }
+
+  if (update._ === 'updateNewMessage') {
+    const { message } = update
+    console.log('[standalone] updateNewMessage:', {
+      chatId: message.chat_id,
+      messageId: message.id,
+      date: message.date,
+      isOutgoing: message.is_outgoing,
+      contentType: message.content._,
+      text: message.content._ === 'messageText' ? message.content.text.text : undefined,
+    })
+  }
 })
 
 client.on('close', () => {
