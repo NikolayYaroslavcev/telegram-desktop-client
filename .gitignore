@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+_td_spike_db_*/
+_td_spike_files_*/
+_td_database/
+_td_files/

@@ -1,0 +1,23 @@
+{
+  "name": "telegram-desktop-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TDLib binding spike (task 01.1) for the Electron/TypeScript/React Telegram desktop client.",
+  "scripts": {
+    "build": "tsc",
+    "spike:node": "npm run build && node dist/run-node.js",
+    "spike:electron": "npm run build && electron .",
+    "spike:standalone": "npm run build && node dist/standalone-client.js"
+  },
+  "main": "dist/electron-main.js",
+  "dependencies": {
+    "dotenv": "17.4.2",
+    "prebuilt-tdlib": "0.1008067.0",
+    "tdl": "8.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "electron": "44.3.0",
+    "typescript": "7.0.2"
+  }
+}
