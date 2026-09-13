@@ -1,5 +1,6 @@
 node_modules/
 dist/
+release/
 .env
 _td_spike_db_*/
 _td_spike_files_*/

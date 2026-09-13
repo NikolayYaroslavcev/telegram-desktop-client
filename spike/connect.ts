@@ -4,7 +4,31 @@ import * as tdl from 'tdl'
 import type { Client } from 'tdl'
 import { getTdjson } from 'prebuilt-tdlib'
 
-tdl.configure({ tdjson: getTdjson() })
+/**
+ * Inside an asar-packaged Electron app, `getTdjson()` resolves via
+ * `require.resolve()`, which returns the *virtual* in-archive path
+ * (".../app.asar/node_modules/...") even though electron-builder's default
+ * native-file detection physically unpacks `tdjson.dll` next to the asar
+ * archive (in "app.asar.unpacked"). Windows' LoadLibrary cannot open a path
+ * "inside" the single-file .asar archive (Win32 error 126, "module not
+ * found") - verified empirically for Task 01.6, see docs/tdlib-decision.md.
+ * Rewriting the virtual path to its real on-disk unpacked counterpart is the
+ * standard Electron workaround for this exact class of problem. No-op
+ * outside a packaged app (no "app.asar" segment in the resolved path).
+ */
+function resolveTdjsonPath(): string {
+  const resolved = getTdjson()
+  const asarMarker = `app.asar${path.sep}`
+  const unpackedMarker = `app.asar.unpacked${path.sep}`
+  if (resolved.includes(asarMarker) && !resolved.includes(unpackedMarker)) {
+    return resolved.replace(asarMarker, unpackedMarker)
+  }
+  return resolved
+}
+
+const tdjsonPath = resolveTdjsonPath()
+console.log('[connect] resolved tdjson path:', tdjsonPath)
+tdl.configure({ tdjson: tdjsonPath })
 
 /**
  * Creates a TDLib client pointed at the same on-disk session used by

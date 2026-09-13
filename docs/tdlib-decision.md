@@ -759,3 +759,248 @@ TDLib once `updateDeleteMessages` has been observed. Additionally:
 
 This is a finding from this experiment only - no tombstone storage, buffering,
 SQLite, or UI work was implemented as part of this task.
+
+## Task 01.6 verification
+
+Goal: prove the `tdl` + `prebuilt-tdlib` binding actually survives
+electron-builder packaging on Windows, not just `electron .` in dev - and
+verify (not assume) every native-dependency/asar question the plan raised.
+
+### Spike added
+
+`spike/electron-main.ts` (the app's `main` entry point) was rewritten for
+this task to reuse the real, already-authorized session from
+`spike/standalone-client.ts` (via `spike/connect.ts`'s `createClient` /
+`resumeExistingSession`, the same helper `spike/delete-experiment.ts`
+already used) instead of the throwaway session used by the original task
+01.2 binding-load check. It:
+
+- creates one `BrowserWindow` (`nodeIntegration: false`, `contextIsolation:
+  true`, `sandbox: true`, no preload) showing a static status string - no
+  Telegram UI, no IPC, TDLib never leaves the main process;
+- resumes the existing session and waits for `authorizationStateReady`
+  (`resumeExistingSession` throws on any login prompt, so a login prompt
+  here is treated as a hard failure, per the "no repeat authorization"
+  precondition from task 01.5);
+- logs `authorizationState` transitions and (structurally only -
+  content-type, never text) `updateNewMessage` arrivals to both the console
+  and a log file at `app.getPath('userData')/spike-01.6.log` (outside the
+  repo and outside the packaged app's install directory in both dev and
+  packaged runs - needed because a packaged GUI app's stdout isn't reliably
+  visible from a terminal, see "Packaged runtime" below);
+- on `window-all-closed`, calls `client.close()` and awaits it before
+  `app.quit()`.
+
+`spike/connect.ts` gained one addition: a `resolveTdjsonPath()` wrapper
+around `getTdjson()` (see "Native dependency" below for why).
+
+### Electron development
+
+`env -u ELECTRON_RUN_AS_NODE npm run spike:electron` (`electron .`, dev,
+unpacked `node_modules`): reached `authorizationStateReady` immediately,
+reusing the existing session with no re-authorization, then received a
+backlog of `updateNewMessage` updates from local history/database sync.
+Confirmed working before touching packaging at all.
+
+### Packaging
+
+- **Tool:** `electron-builder@26.15.3` (added as a devDependency - the repo
+  had no packaging tool before this task).
+- **Target:** `--win --dir` (unpacked `win-unpacked/` directory containing
+  the real `.exe`, not an NSIS installer). Chosen deliberately: `--dir`
+  still produces the exact same `asar`-packed, `asarUnpack`-applied,
+  `@electron/rebuild`-processed application tree an installer would wrap -
+  everything this task needed to verify (native binary resolution inside a
+  packaged app) is identical either way, and skipping the installer step
+  keeps the spike fast and avoids adding an unrelated installer-signing
+  surface. Not exercised: NSIS installer generation/uninstall flow -
+  out of scope for "does TDLib load in a packaged app".
+- **electron-builder config added** (`package.json` `"build"` field):
+  `appId`, `productName`, `directories.output: "release"`, a minimal
+  `files` list (`dist/**/*`, `package.json`), an explicit `asarUnpack` (see
+  below), and `win.target: "dir"`.
+- **How native binaries got into the packaged app:** electron-builder's
+  *default* native-file auto-detection already found and physically
+  extracted both `node_modules/tdl/prebuilds/win32-x64/tdl.node` and
+  `node_modules/@prebuilt-tdlib/win32-x64/tdjson.dll` into
+  `resources/app.asar.unpacked/...` even *before* any explicit `asarUnpack`
+  glob was added - verified by inspecting the packaged output tree. An
+  explicit `asarUnpack` (`node_modules/tdl/prebuilds/**`,
+  `node_modules/@prebuilt-tdlib/**`) was added anyway and kept, to pin this
+  behavior instead of relying on undocumented auto-detection heuristics
+  that could change between electron-builder versions.
+
+### Native dependency
+
+- **`@electron/rebuild`: not added manually, but it runs anyway.**
+  electron-builder vendors `@electron/rebuild` itself and invokes it
+  automatically during `electron-builder --win --dir` (visible in its log
+  as `executing @electron/rebuild ... installing native dependencies ...
+  preparing moduleName=tdl`). This actually **recompiled `tdl`'s native
+  addon from source** against Electron 44's ABI (real MSVC build output:
+  `node_modules/tdl/build/Release/td.node`, `.vcxproj`, `.tlog` files
+  appeared after packaging) rather than reusing the npm-shipped
+  `prebuilds/win32-x64/tdl.node` - `node-gyp-build`'s resolution order
+  prefers a local `build/Release/*.node` over `prebuilds/*` when both
+  exist, so the packaged app actually runs the rebuilt addon. This only
+  worked because this machine happens to have a working MSVC/node-gyp
+  toolchain installed; a machine without one would need it for the
+  **build** step (not for running the already-packaged app - target
+  machines never rebuild anything).
+- **`node-gyp`: not added manually either** - it's a transitive dependency
+  of `@electron/rebuild` (found at `node_modules/.bin/node-gyp`, `v12.4.0`),
+  pulled in the same way.
+- **`asarUnpack`: required, and empirically verified as required** (not
+  assumed - see "Problems / risks" below for the exact failure observed
+  without a working fix). electron-builder's auto-detection already
+  physically unpacks the two native files even with no explicit config, so
+  in one narrow sense "not strictly required to add" - but the explicit
+  glob was kept anyway as a documented, version-independent guarantee. See
+  "Problems / risks" for the real gap this alone did *not* close.
+- **Native/prebuilt files actually required in the packaged app:**
+  `resources/app.asar.unpacked/node_modules/tdl/prebuilds/win32-x64/tdl.node`
+  (or the freshly-rebuilt `node_modules/tdl/build/Release/td.node`, see
+  above) and
+  `resources/app.asar.unpacked/node_modules/@prebuilt-tdlib/win32-x64/tdjson.dll`.
+  Everything else under `node_modules/tdl` and `node_modules/@prebuilt-tdlib`
+  (JS, `.d.ts`, build intermediates) can stay inside `app.asar` - only the
+  two actual native binaries need to be real on-disk files.
+
+### Problems / risks (real, not hypothetical)
+
+**Packaged run failed on the first attempt** with `asarUnpack` *not yet
+configured* (only electron-builder's auto-detection was in effect):
+
+```
+Error: Dynamic Loading Error: Win32 error 126
+    at loadAddon (...\resources\app.asar\node_modules\tdl\dist\addon.js:45:27)
+```
+
+Win32 error 126 = `ERROR_MOD_NOT_FOUND`. Root cause, confirmed by adding a
+diagnostic log of the resolved path right before the failure:
+
+```
+[connect] resolved tdjson path: ...\resources\app.asar\node_modules\@prebuilt-tdlib\win32-x64\tdjson.dll
+```
+
+`prebuilt-tdlib`'s `getTdjson()` resolves the DLL path via
+`require.resolve()`, which returns the *virtual* in-archive spelling
+(`...\app.asar\node_modules\...`) even though the file is physically
+unpacked into `app.asar.unpacked` alongside it. That string is then handed
+directly to a native `LoadLibraryW()` call inside `tdl`'s C++ addon
+(`win32-dlfcn.cpp`) - not through Node's `fs`, so Electron's asar-aware `fs`
+patch (which *does* transparently redirect `fs.readFileSync` etc. to
+`app.asar.unpacked`) never gets a chance to redirect it. Windows tries to
+open a path "inside" `app.asar`, which is one opaque file, not a real
+directory → module not found. This is a known class of Electron/asar
+caveat (transparent redirection covers Node's own `fs`/`require()` of `.js`
+and `.node` modules, not arbitrary path strings handed to non-Node native
+calls) and it would **not** have been caught by just trusting the packaged
+build to succeed - it only surfaced by actually running the packaged
+`.exe`.
+
+**Fix applied** (`spike/connect.ts`): a small `resolveTdjsonPath()` wrapper
+that rewrites `...app.asar\` → `...app.asar.unpacked\` in the resolved path
+when (and only when) that substring is present, before calling
+`tdl.configure()`. No-op in dev (no `app.asar` segment exists there). After
+this fix, the same packaged build reached `authorizationStateReady`
+(verified path in the log:
+`...\resources\app.asar.unpacked\node_modules\@prebuilt-tdlib\win32-x64\tdjson.dll`).
+
+**Takeaway for future tasks:** "the file is unpacked on disk" and "the
+code asks for it at the right path" are two separate facts, and this
+binding's own path-resolution helper (`prebuilt-tdlib`'s `getTdjson()`)
+gets the second one wrong inside asar. Any future `tdl`/`prebuilt-tdlib`
+version bump should re-check whether `getTdjson()` still needs this
+workaround (e.g. if a future release path-resolves via `app.getAppPath()`
+or otherwise becomes asar-aware itself).
+
+Other risks carried over from section 8 (N-API ABI stability assumption
+across Electron versions, no Linux/macOS packaging check, no TDLib version
+bump testing) still apply and were not re-verified here.
+
+### Packaged runtime
+
+All runs below used `env -u ELECTRON_RUN_AS_NODE` (see section 8 - this
+sandboxed dev shell inherits `ELECTRON_RUN_AS_NODE=1` from its own parent
+Electron process, which is unrelated to `tdl`/packaging but breaks *any*
+Electron launch, dev or packaged, if left set) and ran the actual
+`release\win-unpacked\telegram-desktop-client-spike.exe`, never `electron
+.` and never a `.ts`/`.js` file directly.
+
+**First packaged launch** (after the `asarUnpack`/path fix):
+
+```
+[connect] resolved tdjson path: ...\resources\app.asar.unpacked\node_modules\@prebuilt-tdlib\win32-x64\tdjson.dll
+[electron-packaged] app ready; electron: 44.3.0 chrome: 152.0.7977.78
+[electron-packaged] authorizationState -> authorizationStateWaitTdlibParameters
+[electron-packaged] authorizationState -> authorizationStateReady
+[electron-packaged] authorizationStateReady reached - existing session resumed, no re-authorization
+[electron-packaged] updateNewMessage received, contentType: messageText   (several - local history/db sync, harmless)
+```
+
+**Clean shutdown**, verified by actually closing the window (PowerShell
+`Process.CloseMainWindow()`, simulating a real user close - not killing the
+process) and reading the log afterwards:
+
+```
+[electron-packaged] shutting down, closing TDLib client...
+[electron-packaged] authorizationState -> authorizationStateClosing
+[electron-packaged] client closed
+[electron-packaged] authorizationState -> authorizationStateClosed
+[electron-packaged] shutdown complete
+```
+
+The process exited within the 10s wait after the close request every time.
+
+**Second packaged launch** (fresh process, same on-disk TDLib database
+directory): reached `authorizationStateReady` again with **no
+re-authorization prompt or failure**, then shut down cleanly the same way -
+session persistence across a packaged-app restart confirmed.
+
+**Repository-independence check:** the entire `win-unpacked` directory was
+copied to `%TEMP%\tdc-clean-test` (outside the repo, outside
+`node_modules`), and launched from there with `TG_API_ID`/`TG_API_HASH` set
+only as process environment variables (no `.env` file present in that
+directory, no repo files reachable from it). Result was identical:
+`authorizationStateReady` reached, existing session reused, clean shutdown.
+This confirms the packaged app does not depend on being run from, or
+alongside, the source repository.
+
+### Clean environment
+
+**What was actually checked:** the packaged app was run (a) from the build
+output directory, and (b) copied to and run from an unrelated temp
+directory outside the repo, with credentials supplied only via process
+environment variables (no bundled `.env`). Both are on the *same* Windows
+machine used for development.
+
+**What was not checked, honestly:** no separate clean Windows VM/machine
+without Node.js, `node_modules`, or a dev toolchain was available in this
+environment, so "packaged app runs correctly with zero dev tooling on the
+host" was **not** independently verified end-to-end. The repository-copy
+test above is a partial substitute (proves independence from the repo
+*path/contents*, and from any `.env`/env-var leakage into the package
+itself) but it is not equivalent to a true clean-machine test, because
+things like the Visual C++ runtime, GPU drivers, or Windows version
+differences on a genuinely separate machine were not exercised. This
+limitation is being stated explicitly per this task's own instruction not
+to claim "clean machine verified" without one.
+
+### npm run build
+
+Ran clean (`tsc`, no errors) before every dev/packaging step in this task.
+
+### git status / git diff summary
+
+Modified: `.gitignore` (added `release/`), `package.json` /
+`package-lock.json` (added `electron-builder` devDependency, `build` /
+`asarUnpack` / `package:win` script config), `spike/connect.ts`
+(`resolveTdjsonPath()` fix + diagnostic log), `spike/electron-main.ts`
+(rewritten for this task's real-session/packaging spike). No new files
+tracked by git. `release/` (packaged output) and the TDLib database
+directory (`%TEMP%\telegram-desktop-client-standalone`, outside the repo,
+per task 01.3-01.5) were never inside the repository and are not tracked.
+`.env` was not modified and was confirmed absent from both the packaged
+`app.asar` contents and the copied clean-environment test directory. No
+commit was made for this task.

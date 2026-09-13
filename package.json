@@ -8,7 +8,8 @@
     "spike:node": "npm run build && node dist/run-node.js",
     "spike:electron": "npm run build && electron .",
     "spike:standalone": "npm run build && node dist/standalone-client.js",
-    "spike:delete-experiment": "npm run build && node dist/delete-experiment.js"
+    "spike:delete-experiment": "npm run build && node dist/delete-experiment.js",
+    "package:win": "npm run build && electron-builder --win --dir"
   },
   "main": "dist/electron-main.js",
   "dependencies": {
@@ -19,6 +20,25 @@
   "devDependencies": {
     "@types/node": "26.5.1",
     "electron": "44.3.0",
+    "electron-builder": "^26.15.3",
     "typescript": "7.0.2"
+  },
+  "build": {
+    "appId": "com.spike.telegram-desktop-client",
+    "productName": "telegram-desktop-client-spike",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/tdl/prebuilds/**",
+      "node_modules/@prebuilt-tdlib/**"
+    ],
+    "win": {
+      "target": "dir"
+    }
   }
 }
