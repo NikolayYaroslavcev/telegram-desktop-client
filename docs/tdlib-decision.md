@@ -564,3 +564,198 @@ TDLib `message` object and are not read or logged anywhere in this handler.
   string is extracted, per this task's "minimally necessary data" scope.
 - No delete/edit updates were exercised here (`updateDeleteMessages` is
   explicitly plan step 01.5, not this task).
+
+## Task 01.5 verification
+
+**What was added:** `spike/connect.ts` (a small helper that reconnects to the
+*same* on-disk session as `spike/standalone-client.ts`, throwing instead of
+prompting if TDLib ever asks for a fresh login - this experiment only makes
+sense against an already-`authorizationStateReady` session) and
+`spike/delete-experiment.ts` (`npm run spike:delete-experiment -- phase1` /
+`node dist/delete-experiment.js phase2 <chatId> <messageId>`), a one-shot
+diagnostic script. It is not a feature and is not wired into
+`standalone-client.ts`.
+
+### Test setup
+
+- Same real, already-authorized account and same TDLib database directory as
+  tasks 01.3-01.4 (`TDLIB_DATA_DIR`, defaulting to
+  `<tmp>/telegram-desktop-client-standalone`). `resumeExistingSession`
+  confirmed `authorizationStateReady` with **no** re-authorization before any
+  test ran.
+- Same private 1-on-1 chat as task 01.4, `chat_id = 8276449701` (a real
+  second Telegram account). No groups, channels, or bots involved.
+- `tdl@8.1.0` + `prebuilt-tdlib@0.1008067.0` (TDLib 1.8.67), the version
+  decided and used throughout this document.
+- All test messages sent by the experiment itself (via TDLib's own
+  `sendMessage`, from the primary tested account to the private chat) using
+  disposable, self-authored strings (`DELETE_TEST_LOCAL`,
+  `DELETE_TEST_BOTH`, `DELETE_TEST_RACE`, `DELETE_TEST_RESTART`) - not
+  third-party content.
+
+### updateNewMessage
+
+Each test message was confirmed via the real update stream before being
+deleted, exactly as in task 01.4: `sendMessage` returns a message with a
+**temporary** id; `updateMessageSendSucceeded` then arrives with
+`old_message_id` (the temporary id) and the real `message` carrying the
+final id. Example (real, this run):
+
+```
+sendMessage("DELETE_TEST_LOCAL") -> temporary id 165475778561
+updateMessageSendSucceeded: old_message_id=165475778561 -> {
+  chatId: 8276449701,
+  messageId: 165476827136,
+  date: 1789308714,
+  isOutgoing: true,
+  contentType: 'messageText',
+  text: 'DELETE_TEST_LOCAL'
+}
+```
+
+Deletion always targeted the **final** id from `updateMessageSendSucceeded`,
+never the temporary one (see "Timing/race check" below for what happens if a
+delete targets the temporary id instead).
+
+### Delete behavior
+
+**Actual, verbatim `updateDeleteMessages` payload** (TDLib 1.8.67, this
+account, this private chat - four separate real deletions, revoke both
+`false` and `true`):
+
+```json
+{"_":"updateDeleteMessages","chat_id":8276449701,"message_ids":[165476827136],"is_permanent":true,"from_cache":false}
+{"_":"updateDeleteMessages","chat_id":8276449701,"message_ids":[165477875712],"is_permanent":true,"from_cache":false}
+{"_":"updateDeleteMessages","chat_id":8276449701,"message_ids":[165477875713],"is_permanent":true,"from_cache":false}
+{"_":"updateDeleteMessages","chat_id":8276449701,"message_ids":[165479972864],"is_permanent":true,"from_cache":false}
+```
+
+Fields actually present: `chat_id`, `message_ids` (array, one id per test -
+`deleteMessages` was only ever called with a single id at a time here, so
+batching multiple ids into one update was not exercised), `is_permanent`,
+`from_cache`. No other fields are present - in particular, **there is no
+field identifying which message(s) these were, no snapshot of prior content,
+and no field distinguishing a "delete for me" from a "delete for everyone"
+call** (see below). `is_permanent` was `true` and `from_cache` was `false`
+in every observed case, including the `revoke: false` ("delete for me")
+case - i.e. `is_permanent: true` does **not** mean "deleted for all
+participants", it means "TDLib is not just evicting this from a soft cache".
+This matches `@prebuilt-tdlib/types`' documented field shapes for
+`updateDeleteMessages`, confirmed here against the real runtime object
+rather than assumed from the docs.
+
+The message itself is never embedded in `updateDeleteMessages` - only its id.
+
+### Message availability after deletion
+
+**Both `getMessage` (network) and `getMessageLocally` (explicitly documented
+as an offline, cache-only method) were tried against every deleted message
+id, immediately after its `updateDeleteMessages` arrived. Both returned the
+same result every time:**
+
+```
+getMessage(8276449701, 165476827136) -> TDLibError code=404 message=Not Found
+getMessageLocally(8276449701, 165476827136) -> TDLibError code=404 message=Not Found
+```
+
+**Answer: no.** Once `updateDeleteMessages` has been received, the original
+message - id, text, everything - is not retrievable through TDLib by any
+method exercised here, neither over the network nor from TDLib's own local
+cache. TDLib does not keep a retrievable tombstone or shadow copy of deleted
+message content; the only surviving fact is the deleted `message_ids` inside
+the event that reported the deletion.
+
+### Delete-for-self vs delete-for-both
+
+Both scenarios **were** exercised, using `deleteMessages`' own `revoke`
+parameter (`revoke: false` = delete for me only, `revoke: true` = delete for
+all chat members - this is exactly the mechanism behind Telegram's own
+"Delete for me" / "Delete for everyone" chat UI for a private chat; TDLib's
+type comment confirms `revoke` is meaningful for private chats and is
+forced `true` only for supergroups/channels/secret chats).
+
+**Finding: the resulting `updateDeleteMessages` is identical in shape and
+values for both cases** (`is_permanent: true`, `from_cache: false` either
+way, from the sending account's own perspective) - there is no field in the
+update that lets the receiving code distinguish "I deleted this only for
+myself" from "I deleted this for both participants". Any such distinction
+must come from the caller's own memory of which `revoke` value it used, not
+from the update.
+
+**Documented limitation (not simulated):** this project has only one
+authorized TDLib session (the primary tested account). What the **second**
+account's own TDLib client observes for a `revoke: false` deletion
+initiated by the first account was not verified here - that would require a
+second, separately authorized TDLib session for the second account, which
+is out of scope for this spike. This spike only establishes what the
+*initiating* account's own client sees, for both `revoke` values.
+
+### Timing/order check
+
+Observed order for a normal send-then-delete: `sendMessage` (temporary id)
+-> `updateMessageSendSucceeded` (final id) -> `deleteMessages` call ->
+`updateDeleteMessages` (final id). No reordering was observed across four
+independent runs of this sequence.
+
+**Race scenario (deleting immediately after `sendMessage` resolves, without
+waiting for `updateMessageSendSucceeded`):** `deleteMessages` was called
+with the **temporary** id returned directly by `sendMessage`, before
+`updateMessageSendSucceeded` had arrived. Real result: `deleteMessages`
+succeeded immediately, and the resulting `updateDeleteMessages` referenced
+that same temporary id (`165477875713` in this run) - `updateNewMessage`/
+`updateMessageSendSucceeded` for that message never arrived at all (message
+send was apparently canceled server-side before completion). No crash, no
+hang, no unhandled rejection in either the deleting client or this script.
+This means the temporary id TDLib hands back from `sendMessage` is itself a
+valid `deleteMessages` target for a brief window, and deleting fast enough
+can suppress the final send entirely rather than send-then-delete.
+
+### Restart behavior
+
+A message (`DELETE_TEST_RESTART`) was sent, its final id captured, deleted
+with `revoke: true`, and its `updateDeleteMessages` confirmed - all in one
+process. The process was then closed (`client.close()`, real
+`authorizationStateClosing` -> `authorizationStateClosed`) and a **separate**
+process (`phase2`) was started against the same database directory:
+
+```
+authorizationState -> authorizationStateReady   (no re-authorization)
+getMessage(8276449701, 165479972864) -> TDLibError code=404 message=Not Found
+getMessageLocally(8276449701, 165479972864) -> TDLibError code=404 message=Not Found
+Update types observed in that window: updateChatReadInbox, updateUserStatus, updateNewMessage, updateChatLastMessage
+```
+
+After restart: the message stays unavailable through both `getMessage` and
+`getMessageLocally` (i.e. the "not found" state persisted across a real
+process restart against the same on-disk database, not just held in
+in-memory state), and **no additional `updateDeleteMessages` (and no update
+of any kind referencing that message id) was emitted on the fresh startup** -
+deletion is not "replayed" to a newly (re)connecting client.
+
+### Architectural implication for tombstones
+
+TDLib provides **no** mechanism, at any point after `updateDeleteMessages`
+fires, to recover a deleted message's text - not from the network, not from
+TDLib's local cache, not after a restart, and the delete event itself never
+carries the original content. Therefore: **for Task 16, a tombstone must
+capture and persist the message's content (at minimum the text, and
+whatever else the app wants to keep) at `updateNewMessage`/edit time,
+*before* any deletion can happen** - there is nothing left to backfill from
+TDLib once `updateDeleteMessages` has been observed. Additionally:
+
+- A tombstone's storage layer cannot distinguish "deleted for me" from
+  "deleted for everyone" from `updateDeleteMessages` alone (both produce the
+  same fields); if that distinction matters to the tombstone UI, it can only
+  be inferred from context the app already has (e.g. whether the deletion
+  was locally initiated with a known `revoke` value), never from the update
+  itself, and it cannot be inferred at all for a deletion initiated by the
+  other party.
+- Because a `deleteMessages` call issued immediately after sending can
+  suppress the final message entirely (see "Timing/order check"), a
+  tombstone/history store fed only by `updateNewMessage` could plausibly
+  never see certain very-short-lived outgoing messages at all before their
+  deletion - this is a real ordering edge case to keep in mind for Task 16,
+  not a hypothetical one.
+
+This is a finding from this experiment only - no tombstone storage, buffering,
+SQLite, or UI work was implemented as part of this task.

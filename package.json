@@ -7,7 +7,8 @@
     "build": "tsc",
     "spike:node": "npm run build && node dist/run-node.js",
     "spike:electron": "npm run build && electron .",
-    "spike:standalone": "npm run build && node dist/standalone-client.js"
+    "spike:standalone": "npm run build && node dist/standalone-client.js",
+    "spike:delete-experiment": "npm run build && node dist/delete-experiment.js"
   },
   "main": "dist/electron-main.js",
   "dependencies": {
