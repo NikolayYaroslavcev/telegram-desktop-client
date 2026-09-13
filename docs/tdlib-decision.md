@@ -1,8 +1,16 @@
-# TDLib Integration Decision (Task 01.1)
+# TDLib Integration Decision (Tasks 01.1–01.7)
 
-Status: decided and spiked. Scope: binding choice + minimal proof that TDLib
-responds inside both plain Node.js and Electron's main process. No
-auth/IPC/UI/persistence/packaging is implemented here (see [docs/plan.md](plan.md), sections 01.2+).
+Status: **finalized** (Task 01.7 checkpoint). Original scope (01.1): binding
+choice + minimal proof that TDLib responds inside both plain Node.js and
+Electron's main process. That scope has since been extended, task by task,
+by 01.2 (standalone client + `.env` credentials), 01.3 (full phone/OTP/2FA
+authorization + session persistence), 01.4 (incoming/outgoing private-chat
+messages), 01.5 (message deletion semantics), and 01.6 (packaged Windows
+Electron app) — each documented in its own dated section below. See
+[Task 01.7 — Final decision](#task-017--final-decision) at the end of this
+document for the consolidated, end-of-spike conclusion. No production
+IPC/UI/domain-model/storage code is implemented in this document or in
+`spike/` — that begins at [docs/plan.md](plan.md) section 02+.
 
 ## 1. Decision
 
@@ -117,6 +125,15 @@ docs establish):
   verified with an actual `electron-builder` packaged build in this task,
   per the explicit scope limit ("packaging всего приложения" is out of
   scope for 01.1; that check belongs to plan step 01.6).
+  **Update (Task 01.6): confirmed, with a caveat this inference missed.**
+  `asarUnpack` was empirically required — see "Task 01.6 verification"
+  below. But `require.resolve()`'s virtual in-archive path is not merely
+  "inferred to work via `asarUnpack`" as assumed here: it is handed
+  directly to a native `LoadLibraryW()` call that bypasses Electron's
+  asar-aware `fs` redirection, so the first packaged run actually failed at
+  runtime (`Win32 error 126`) until an explicit path rewrite
+  (`resolveTdjsonPath()` in `spike/connect.ts`) was added. `asarUnpack`
+  alone was necessary but not sufficient.
 - Because the addon is N-API, no separate "Electron build" of `tdl` itself
   is required at packaging time — the same prebuilds used in development
   are expected to work in the packaged app. This is the one claim in this
@@ -124,6 +141,20 @@ docs establish):
   in-repo evidence in section 9, rather than on a from-scratch clean-machine
   test; that clean-machine confirmation is explicitly plan step 01.6, not
   this task.
+  **Update (Task 01.6): partially contradicted, though the underlying ABI
+  point still held.** `electron-builder` does not simply reuse the
+  npm-shipped prebuild at packaging time — it vendors and auto-invokes
+  `@electron/rebuild`, which recompiled `tdl`'s native addon from source
+  against Electron 44's ABI on the build machine, and `node-gyp-build` then
+  preferred that freshly built `build/Release/*.node` over the shipped
+  `prebuilds/*`. So "no separate Electron build is required" holds in the
+  sense that N-API made the result (whichever binary ends up loaded) work
+  identically in dev and packaged builds with no code changes — but it does
+  not hold in the sense that the packaging pipeline itself performs a
+  from-source native rebuild by default, which needs a working
+  MSVC/node-gyp toolchain on the machine that *runs* `electron-builder`, not
+  just on a machine that runs the already-packaged app. See "Task 01.6
+  verification" below for the exact evidence.
 - `contextIsolation: true` / `nodeIntegration: false` / a strict
   `contextBridge` API (plan #03) are unaffected by this choice — TDLib lives
   entirely in the main process either way and the renderer never touches it.
@@ -167,18 +198,27 @@ against this spike's code (verified in section 9).
   than assumed. Residual risk: if a future `tdl` release ever stops being
   purely N-API (e.g. adds a feature requiring direct V8 API access), this
   guarantee would need to be re-checked.
-- **Rebuild**: Not needed in the case verified here (prebuild available for
-  `win32-x64`). If the team ever develops on an architecture/libc
-  combination without a published prebuild (e.g. some Linux distro), `npm
-  install` would fall back to compiling from source, which *does* need a
-  C++14 toolchain and Python, and that build would need to target
-  Electron's headers if it's ever built specifically for a packaged app
-  (not exercised in this spike — dev machine had a prebuild available).
-- **Packaging (`electron-builder`/`asar`)**: Not verified in this task
-  (explicitly deferred to plan 01.6). The real risk is forgetting
-  `asarUnpack` for the two native files; if omitted, the app will fail at
-  runtime in the packaged build while working fine in dev — exactly the
-  failure mode plan step 01.6 exists to catch.
+- **Rebuild**: Not needed for plain `npm install` / dev `electron .` in the
+  case verified here (prebuild available for `win32-x64`). If the team ever
+  develops on an architecture/libc combination without a published prebuild
+  (e.g. some Linux distro), `npm install` would fall back to compiling from
+  source, which *does* need a C++14 toolchain and Python.
+  **Update (Task 01.6): a rebuild happens anyway at packaging time**, even
+  on `win32-x64` with a prebuild available — `electron-builder` auto-runs
+  `@electron/rebuild`, which recompiled `tdl` from source against Electron's
+  ABI, and the freshly built binary is what the packaged app actually
+  loads. The build machine therefore needs a working C++/node-gyp toolchain
+  for `npm run package:win`, even though no developer needs one for `npm
+  install` or day-to-day dev. See "Task 01.6 verification" below.
+- **Packaging (`electron-builder`/`asar`)**: **Update (Task 01.6): verified,
+  not merely a risk anymore.** The predicted failure mode below did occur on
+  the first packaged run and was fixed; see "Task 01.6 verification" for the
+  exact error and fix. Original risk statement, kept for context: forgetting
+  `asarUnpack` for the two native files would make the app fail at runtime
+  in the packaged build while working fine in dev. In practice, even with
+  `asarUnpack` correctly configured, `prebuilt-tdlib`'s own path-resolution
+  helper still needed an additional runtime fix (see section 6) — omitting
+  `asarUnpack` was not the only way to hit this failure mode.
 - **Windows-specific**: The spike ran and passed on Windows
   (`win32-x64`, this machine). No Linux/macOS verification was performed —
   acceptable per the plan, since the project's stated packaging target is
@@ -1004,3 +1044,158 @@ per task 01.3-01.5) were never inside the repository and are not tracked.
 `.env` was not modified and was confirmed absent from both the packaged
 `app.asar` contents and the copied clean-environment test directory. No
 commit was made for this task.
+
+## Task 01.7 — Final decision
+
+Documentation-only checkpoint. No new spike code, no new experiments — this
+section consolidates Tasks 01.1–01.6 into the single decision plan §01.7
+asks for, and reconciles the two places above (section 6, section 8) where
+an earlier "deferred to 01.6" / "expected" claim has since been confirmed or
+corrected by 01.6's actual results (see the **Update (Task 01.6):**
+paragraphs inserted into those sections).
+
+### Final stack
+
+Pinned versions, taken directly from `package.json` — no version below is
+invented:
+
+| Component | Version | Notes |
+|---|---|---|
+| `tdl` | 8.1.0 | Runtime dependency, exact pin |
+| `prebuilt-tdlib` | 0.1008067.0 | Runtime dependency, exact pin; encodes **TDLib 1.8.67** (confirmed at runtime via `getTdlibInfo()`, section 9) |
+| `electron` | 44.3.0 | devDependency, exact pin; bundles Node.js 24.20.0 / Chromium 152.0.7977.78 internally (section 9) |
+| `typescript` | 7.0.2 | devDependency, exact pin |
+| `@types/node` | 26.5.1 | devDependency, exact pin |
+| `dotenv` | 17.4.2 | Runtime dependency, exact pin |
+| `electron-builder` | ^26.15.3 | devDependency, added in Task 01.6, **caret range** — the one dependency in this project not following the "no ranges" rule from section 7. Not corrected as part of this documentation-only task (see item 8 in the task instructions — avoid touching files beyond this one without a functional need); flagged here as a minor, low-risk inconsistency since it is a build-time-only tool with no runtime ABI surface, not a dependency whose version affects TDLib behavior. |
+
+Node.js `22.19.0` / npm `10.9.3` were the runtime used to verify every spike
+in this document (section 5); `package.json` has no `engines` field, so this
+is a documented dev-environment fact, not an enforced constraint.
+
+### Tasks 01.1–01.6 results, as actually observed
+
+- **01.1 — binding decision.** `tdl` + `prebuilt-tdlib` chosen over
+  `tdl-tdlib-addon` (deprecated) and a from-scratch FFI/N-API binding
+  (unnecessary maintenance burden); full reasoning and alternatives table in
+  sections 2–3 above.
+- **01.2 — standalone.** `spike/standalone-client.ts` starts a real TDLib
+  client and loads `TG_API_ID`/`TG_API_HASH` from a local, gitignored `.env`
+  — no hardcoded credentials anywhere in the spike. Confirmed in "Task 01.2
+  verification" above, including a hard failure (not a placeholder
+  fallback) when `.env` is absent.
+- **01.3 — authorization.** Full real cycle confirmed:
+  `authorizationStateWaitPhoneNumber` → phone entered →
+  `authorizationStateWaitPassword` (2FA) → password entered →
+  `authorizationStateReady`. Session persistence confirmed on a second,
+  separate process run against the same on-disk database (straight to
+  `authorizationStateReady`, no re-entry of phone/OTP/password). See "Task
+  01.3 verification" above.
+- **01.4 — new messages.** `updateNewMessage` observed for a real private
+  1-on-1 chat, both incoming (`is_outgoing: false`, sent from a second real
+  account) and outgoing (`is_outgoing: true`). Confirmed message fields:
+  `chat_id`, `message.id`, `message.date`, `message.is_outgoing`,
+  `message.content._`. **Confirmed extraction: for `content._ ===
+  'messageText'`, `message.content.text.text` is the plain-string message
+  text** (`messageText.text` itself is a `formattedText { text, entities }`,
+  not a bare string — only `.text.text` was extracted, per scope). See "Task
+  01.4 verification" above.
+- **01.5 — deletion.** Real, verbatim `updateDeleteMessages` payload
+  contains exactly `chat_id`, `message_ids`, `is_permanent`, `from_cache` —
+  no other fields, no snapshot of prior content. **Main finding: the
+  original message text cannot be recovered through TDLib after
+  `updateDeleteMessages` fires** — `getMessage` (network) and
+  `getMessageLocally` (cache-only) both returned `404 Not Found` for every
+  deleted id tested, including after a full process restart against the
+  same on-disk database. Documented limitation, preserved as-is: the
+  second Telegram account's own point of view on `revoke: false` /
+  `revoke: true` deletions was **not** independently verified — this spike
+  only ever had one authorized TDLib session (the initiating account); see
+  "Delete-for-self vs delete-for-both" above. Race observation preserved as
+  found: deleting a message by its *temporary* send-returned id, before
+  `updateMessageSendSucceeded` arrives, can suppress the send entirely
+  rather than send-then-delete (see "Timing/order check" above).
+- **01.6 — Electron packaging.** TDLib confirmed running only in the
+  Electron **main** process (`spike/electron-main.ts`, a `BrowserWindow`
+  with `contextIsolation: true` / `nodeIntegration: false` / `sandbox:
+  true` and no preload wired to TDLib). Packaged with `electron-builder
+  --win --dir`; the real, packaged `.exe` was launched directly (never
+  `electron .`, never a `.ts`/`.js` file) and reached
+  `authorizationStateReady` by resuming the existing session with no
+  re-authorization, then shut down cleanly. Native TDLib loading required a
+  real fix, not just configuration: `asarUnpack` was necessary, but
+  `prebuilt-tdlib`'s `getTdjson()` still returned an in-archive
+  (`app.asar\...`) path that a native `LoadLibraryW()` call couldn't
+  resolve, causing `Win32 error 126` on the first packaged run; fixed with
+  a `resolveTdjsonPath()` path rewrite in `spike/connect.ts`. `electron-
+  builder` vendors and auto-runs `@electron/rebuild` (which pulls in
+  `node-gyp` transitively), and this **did** recompile `tdl`'s native addon
+  from source against Electron's ABI on the build machine, rather than
+  reusing the shipped prebuild — see the corrected claim in section 6/8
+  above. No separate clean VM was used; the closest substitute was copying
+  the packaged output to an unrelated temp directory outside the repo and
+  running it from there with credentials supplied only via process
+  environment variables (no bundled `.env`), which passed identically. See
+  "Task 01.6 verification" above for full logs and error text.
+
+### Final architectural decision
+
+Based on the above, and scoped strictly to what 01.1–01.6 actually
+exercised (nothing from plan §02+ is decided here):
+
+- TDLib is used via **`tdl` + `prebuilt-tdlib`**, pinned exactly as in the
+  table above. No alternative binding remains under consideration.
+- The TDLib client runs **exclusively in the Electron main process**. It is
+  never created in, and never exposed to, the renderer.
+- The renderer never receives a raw TDLib client or raw TDLib objects —
+  only through a `contextBridge` IPC surface and domain models, per
+  `docs/plan.md` §03–§06. This spike's own `BrowserWindow` (`contextIsolation:
+  true`, `nodeIntegration: false`, `sandbox: true`, no preload) is
+  consistent with that constraint, though it does not itself implement the
+  IPC contract (out of scope for 01.6).
+- Native binaries (`tdl.node`, `tdjson.dll`) must both be unpacked from
+  `asar` (`asarUnpack`) **and** have every runtime path that resolves them
+  checked for asar-virtual-path leakage — `asarUnpack` configuration alone
+  was insufficient in this spike; a code-level path fix was also required.
+- The TDLib database directory must be stored **outside the repository and
+  outside the application's own source tree** — verified throughout
+  01.2–01.6 via `os.tmpdir()`/`TDLIB_DATA_DIR`, becoming `app.getPath('userData')`
+  in the real app per `docs/plan.md` §08.
+- **Tombstone text must be captured and persisted by the application at
+  message-receipt (or edit) time, strictly before any deletion can occur**
+  — TDLib provides no mechanism, network or cache, to recover a deleted
+  message's original content once `updateDeleteMessages` has fired, and
+  this was verified to hold across a full process restart. This is the
+  direct input to `docs/plan.md` §15/§16.
+
+### What was not proven
+
+Preserved and consolidated from sections 8 and "Task 01.6 verification"
+above — these are scope boundaries for a Windows-targeted project (plan
+§21), not open defects:
+
+- No separate clean Windows VM/machine (without Node.js, `node_modules`, or
+  any dev toolchain) was used. The 01.6 "clean environment" check — copying
+  the packaged output to an unrelated temp directory on the *same*
+  development machine — is a partial substitute, not equivalent to a true
+  clean-machine test.
+- Linux/macOS packaging was not attempted or verified.
+- The NSIS installer flow was not exercised — only `--win --dir` (unpacked
+  output) packaging was tested. The underlying `asar`/native-file mechanics
+  verified are expected to be the same either way, but the installer
+  wrapper itself is untested.
+- Delete-for-self vs. delete-for-both was only observed from the
+  *initiating* account's own TDLib session. What a second, independently
+  authorized TDLib session (the other participant) itself receives for each
+  `revoke` value was not verified in this spike.
+
+### Security check
+
+Reviewed this entire document for: `TG_API_HASH`/API credential values, OTP
+codes, the 2FA password, full real phone numbers, third-party message
+content, and sensitive local paths. None are present. Numeric `chat_id`
+values recorded above are Telegram user/chat ids (not phone numbers);
+recorded message text is limited to disposable, self-authored test strings
+sent by the tested account itself (explicitly called out as such wherever
+recorded); paths use `<TEMP>`/`%TEMP%` placeholders rather than
+machine-specific usernames or directories.
