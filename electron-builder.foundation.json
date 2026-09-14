@@ -8,6 +8,11 @@
   "extraMetadata": {
     "main": "out/main/index.js"
   },
+  "asarUnpack": [
+    "node_modules/tdl/prebuilds/**",
+    "node_modules/@prebuilt-tdlib/**",
+    "node_modules/better-sqlite3/prebuilds/**"
+  ],
   "win": {
     "target": "dir"
   }

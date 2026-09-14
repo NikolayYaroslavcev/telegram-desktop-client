@@ -53,6 +53,8 @@ export default tseslint.config(
         process: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        Buffer: 'readonly',
+        console: 'readonly',
       },
     },
     rules: {

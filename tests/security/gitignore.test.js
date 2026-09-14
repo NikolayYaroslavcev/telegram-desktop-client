@@ -19,6 +19,10 @@ test('.env.example contains only empty placeholders, no real secret values', () 
     if (!trimmed || trimmed.startsWith('#')) continue
     const [, ...rest] = trimmed.split('=')
     const value = rest.join('=').trim()
-    assert.equal(value, '', `expected an empty placeholder value in .env.example, got: "${trimmed}"`)
+    assert.equal(
+      value,
+      '',
+      `expected an empty placeholder value in .env.example, got: "${trimmed}"`,
+    )
   }
 })

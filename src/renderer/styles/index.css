@@ -1,0 +1,15 @@
+@import 'tailwindcss';
+
+/* Manual light/dark toggle (ThemeToggle) instead of relying only on
+   prefers-color-scheme - see src/renderer/theme/ThemeToggle.tsx. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+}

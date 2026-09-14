@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "outDir": "out/renderer-logic",
+    "rootDir": "src",
+    "strict": true,
+    "noEmitOnError": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": ["src/renderer/auth/*.ts", "src/renderer/messages/*.ts", "src/renderer/network/*.ts"],
+  "exclude": ["src/renderer/auth/useAuthorization.ts", "src/renderer/network/useNetworkStatus.ts"]
+}
