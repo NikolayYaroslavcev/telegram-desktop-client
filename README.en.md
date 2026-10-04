@@ -19,17 +19,6 @@ Implemented and verified:
 - Reconnect/recovery after network loss or restart
 - Light/dark UI theme (follows OS preference)
 
-### Scope limitations
-
-This client intentionally supports only a narrow, fixed feature set:
-
-- Private 1-on-1 chats only, no groups, channels, or bots
-- No search
-- No Markdown rendering
-- No hotkeys
-- Attachments limited to images and documents/files (no audio, video, stickers, or GIFs)
-- No delivery/read receipts, avatars, typing indicators, or unread counters
-
 ## Tech Stack
 
 - [Electron](https://www.electronjs.org/)
@@ -145,16 +134,3 @@ src/renderer/   React UI
 src/shared/     Shared IPC contracts and domain models
 tests/          Automated tests
 ```
-
-## Limitations / Scope
-
-**Intentionally out of scope:**
-- Groups, channels, and bots
-- Search
-- Markdown rendering
-- Hotkeys
-- Attachments other than images and documents/files (no audio, video, stickers, GIFs)
-
-**Not configured:**
-- No installer target for Windows packaging (unpacked `--dir` build only)
-- No non-Windows packaging target
