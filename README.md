@@ -1,44 +1,46 @@
 # Telegram Desktop Client
 
-A standalone desktop client for Telegram, built on Electron, React, and TDLib. This is an independent implementation of a Telegram client — it is **not** the official Telegram Desktop application and is not affiliated with Telegram.
+**Русский** · [English](README.en.md)
 
-## Features
+Самостоятельный десктопный клиент для Telegram на Electron, React и TDLib. Это независимая реализация клиента Telegram. Он **не** является официальным приложением Telegram Desktop и никак не связан с Telegram.
 
-Implemented and verified:
+## Возможности
 
-- Phone number + OTP authentication, including 2FA (cloud password)
-- Private 1-on-1 chats
-- Text messages (send/receive)
-- Replies, with quoted preview of the original message
-- Image and document/file attachments
-- Realtime updates (new messages, deletions, connection state)
-- Local message cache (SQLite)
-- Tombstones for deleted messages (deleted messages remain visible with their original text and a "deleted" indicator)
-- Reconnect/recovery after network loss or restart
-- Light/dark UI theme (follows OS preference)
+Реализовано и проверено:
 
-### Scope limitations
+- Авторизация по номеру телефона и коду из SMS, включая 2FA (облачный пароль)
+- Личные чаты один на один
+- Текстовые сообщения (отправка и получение)
+- Ответы с цитатой исходного сообщения
+- Вложения: изображения и документы/файлы
+- Обновления в реальном времени (новые сообщения, удаления, состояние соединения)
+- Локальный кэш сообщений (SQLite)
+- Надгробия для удалённых сообщений (удалённые сообщения остаются видимыми с исходным текстом и пометкой «удалено»)
+- Переподключение и восстановление после потери сети или перезапуска
+- Светлая и тёмная тема интерфейса (следует настройке ОС)
 
-This client intentionally supports only a narrow, fixed feature set:
+### Ограничения по функциональности
 
-- Private 1-on-1 chats only — no groups, channels, or bots
-- No search
-- No Markdown rendering
-- No hotkeys
-- Attachments limited to images and documents/files (no audio, video, stickers, or GIFs)
-- No delivery/read receipts, avatars, typing indicators, or unread counters
+Клиент намеренно поддерживает только узкий, фиксированный набор возможностей:
 
-## Tech Stack
+- Только личные чаты один на один, без групп, каналов и ботов
+- Без поиска
+- Без отображения Markdown
+- Без горячих клавиш
+- Вложения только изображения и документы/файлы (без аудио, видео, стикеров и GIF)
+- Без уведомлений о доставке и прочтении, аватаров, индикаторов набора текста и счётчиков непрочитанных
+
+## Технологический стек
 
 - [Electron](https://www.electronjs.org/)
 - [React](https://react.dev/)
 - [TypeScript](https://www.typescriptlang.org/)
-- [TDLib](https://core.telegram.org/tdlib) via [`tdl`](https://github.com/eilvelia/tdl) and [`prebuilt-tdlib`](https://github.com/eilvelia/tdl/tree/main/packages/prebuilt-tdlib)
-- SQLite via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) (application-level local cache)
+- [TDLib](https://core.telegram.org/tdlib) через [`tdl`](https://github.com/eilvelia/tdl) и [`prebuilt-tdlib`](https://github.com/eilvelia/tdl/tree/main/packages/prebuilt-tdlib)
+- SQLite через [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) (локальный кэш уровня приложения)
 - [Vite](https://vite.dev/)
 - [electron-builder](https://www.electron.build/)
 
-## Architecture
+## Архитектура
 
 ```
 Renderer (React UI)
@@ -52,51 +54,51 @@ Main (Electron main process)
 TDLib / SQLite
 ```
 
-- The renderer never talks to TDLib directly — it only calls the whitelisted API exposed by the preload script via `contextBridge`.
-- TDLib lives entirely in the main process; the renderer only sees mapped domain models, never raw TDLib objects.
-- SQLite (`better-sqlite3`) is an application-level local cache (messages, tombstones), separate from TDLib's own database/files.
+- Renderer никогда не обращается к TDLib напрямую. Он вызывает только API из белого списка, который preload-скрипт открывает через `contextBridge`.
+- TDLib целиком живёт в главном процессе; renderer видит только преобразованные доменные модели, но не сырые объекты TDLib.
+- SQLite (`better-sqlite3`) это локальный кэш уровня приложения (сообщения, надгробия), отдельный от собственной базы и файлов TDLib.
 
-Key directories:
+Основные каталоги:
 
-| Path | Contents |
+| Путь | Содержимое |
 |---|---|
-| `src/main/` | Electron main process, TDLib integration, storage, IPC handlers |
-| `src/preload/` | Secure renderer ↔ main bridge (`contextBridge` API) |
+| `src/main/` | Главный процесс Electron, интеграция с TDLib, хранилище, IPC-обработчики |
+| `src/preload/` | Безопасный мост renderer ↔ main (API `contextBridge`) |
 | `src/renderer/` | React UI |
-| `src/shared/` | Shared IPC contracts and domain models (main + renderer) |
-| `tests/` | Automated tests |
+| `src/shared/` | Общие IPC-контракты и доменные модели (main + renderer) |
+| `tests/` | Автоматические тесты |
 
-## Requirements
+## Требования
 
-- Node.js 22.19.0 (the version this project's TDLib integration was verified against)
-- npm 10.9.3 (bundled with the Node.js install above)
-- Windows — the current packaging configuration only targets Windows (`electron-builder.foundation.json`)
-- A Telegram account and access to Telegram to authenticate
-- A Telegram API `api_id` / `api_hash` pair, obtained from [my.telegram.org](https://my.telegram.org/)
+- Node.js 22.19.0 (версия, на которой проверялась интеграция проекта с TDLib)
+- npm 10.9.3 (поставляется вместе с указанной версией Node.js)
+- Windows: текущая конфигурация сборки рассчитана только на Windows (`electron-builder.foundation.json`)
+- Аккаунт Telegram и доступ к Telegram для авторизации
+- Пара `api_id` / `api_hash` для Telegram API, полученная на [my.telegram.org](https://my.telegram.org/)
 
-## Configuration
+## Конфигурация
 
-TDLib credentials are read from a `.env` file in the repository root. Copy `.env.example` and fill in your own values:
+Учётные данные TDLib читаются из файла `.env` в корне репозитория. Скопируйте `.env.example` и подставьте свои значения:
 
 ```
 TG_API_ID=your_api_id
 TG_API_HASH=your_api_hash
 ```
 
-- Do not commit `.env` — it is already excluded via `.gitignore`.
-- Do not publish or share your `api_id`/`api_hash`; the `api_hash` is a secret.
-- Never commit a real TDLib session/database — TDLib's own local database and files (separate from the application's SQLite cache) must stay outside the repository.
+- Не коммитьте `.env`. Он уже исключён через `.gitignore`.
+- Не публикуйте и не передавайте другим свои `api_id`/`api_hash`; `api_hash` является секретом.
+- Никогда не коммитьте настоящую сессию или базу TDLib. Собственная локальная база и файлы TDLib (отдельные от SQLite-кэша приложения) должны оставаться вне репозитория.
 
-## Development
+## Разработка
 
 ```
 npm ci
 npm run dev
 ```
 
-A `.env` with valid `TG_API_ID`/`TG_API_HASH` (see [Configuration](#configuration)) is required before running the app, or authentication will not be able to proceed.
+Перед запуском приложения нужен `.env` с корректными `TG_API_ID`/`TG_API_HASH` (см. [Конфигурация](#конфигурация)), иначе авторизация не сможет пройти.
 
-## Verification
+## Проверка
 
 ```
 npm run typecheck   # type-check main, preload, and renderer
@@ -107,34 +109,34 @@ npm run build:spike  # builds the standalone TDLib spike scripts under spike/
 npm run package       # production Windows package (see below)
 ```
 
-The automated suite currently has one environment-dependent security-harness failure when an existing authenticated TDLib session and local `.env` are present; the product/package verification is unaffected.
+Сейчас в автоматическом наборе тестов есть один сбой security-harness, зависящий от окружения: он возникает, когда присутствуют существующая авторизованная сессия TDLib и локальный `.env`. На проверку продукта и сборки это не влияет.
 
-## Production Packaging
+## Продакшн-сборка
 
 ```
 npm run package
 ```
 
-This runs the production build and then `electron-builder --config electron-builder.foundation.json --win --dir`.
+Команда запускает продакшн-сборку, а затем `electron-builder --config electron-builder.foundation.json --win --dir`.
 
-The current packaging configuration produces a Windows unpacked distribution; no installer target is configured.
+Текущая конфигурация сборки создаёт распакованный дистрибутив для Windows; установщик не настроен.
 
-## Security
+## Безопасность
 
-- Context isolation enabled, Node integration disabled, renderer sandboxed
-- Restrictive Content-Security-Policy on the renderer
-- Navigation and new-window creation restricted
-- Renderer access to main is limited to an explicit, whitelisted IPC API exposed via `contextBridge`
-- Secrets (`.env`, TDLib session data) are excluded from the repository and from the packaged app
+- Включена изоляция контекста, Node integration отключена, renderer работает в песочнице
+- Строгая Content-Security-Policy для renderer
+- Навигация и создание новых окон ограничены
+- Доступ renderer к main ограничен явным API IPC из белого списка, который открыт через `contextBridge`
+- Секреты (`.env`, данные сессии TDLib) исключены из репозитория и из собранного приложения
 
-## Data & Privacy
+## Данные и приватность
 
-- All Telegram protocol data is handled through TDLib, which maintains its own local database and files.
-- The application keeps a separate local message cache in SQLite, used for the local history and tombstone features.
-- Local runtime data (including TDLib's database/files) is stored under Electron's `userData` directory, outside the repository.
-- Credentials and session data must never be committed to this repository.
+- Все данные протокола Telegram обрабатываются через TDLib, который ведёт собственную локальную базу и файлы.
+- Приложение хранит отдельный локальный кэш сообщений в SQLite, он нужен для локальной истории и надгробий.
+- Локальные данные времени выполнения (включая базу и файлы TDLib) хранятся в каталоге `userData` Electron, вне репозитория.
+- Учётные данные и данные сессии ни при каких условиях не должны попадать в этот репозиторий.
 
-## Project Structure
+## Структура проекта
 
 ```
 src/main/       Electron main process, TDLib, storage, IPC handlers
@@ -144,15 +146,15 @@ src/shared/     Shared IPC contracts and domain models
 tests/          Automated tests
 ```
 
-## Limitations / Scope
+## Ограничения и рамки
 
-**Intentionally out of scope:**
-- Groups, channels, and bots
-- Search
-- Markdown rendering
-- Hotkeys
-- Attachments other than images and documents/files (no audio, video, stickers, GIFs)
+**Намеренно вне рамок проекта:**
+- Группы, каналы и боты
+- Поиск
+- Отображение Markdown
+- Горячие клавиши
+- Вложения, кроме изображений и документов/файлов (без аудио, видео, стикеров, GIF)
 
-**Not configured:**
-- No installer target for Windows packaging (unpacked `--dir` build only)
-- No non-Windows packaging target
+**Не настроено:**
+- Нет цели установщика для сборки под Windows (только распакованная сборка `--dir`)
+- Нет цели сборки для других платформ, кроме Windows
